@@ -218,12 +218,6 @@
             border-radius: 12px;
         }
 
-        .download-btn {
-            margin-top: 12px;
-            width: 100%;
-            justify-content: center;
-        }
-
         .recording-indicator {
             display: inline-flex;
             align-items: center;
@@ -281,6 +275,21 @@
             letter-spacing: 0.5px;
         }
 
+        .warning {
+            background: #fff3e0;
+            border-left: 4px solid #ff9800;
+            padding: 12px 16px;
+            border-radius: 0 8px 8px 0;
+            margin-bottom: 16px;
+            font-size: 0.85rem;
+            color: #e65100;
+            display: none;
+        }
+
+        .warning.show {
+            display: block;
+        }
+
         @media (max-width: 600px) {
             .container {
                 padding: 24px;
@@ -301,33 +310,37 @@
         <h1>🎙️ Text to Speech</h1>
         <p class="subtitle">Select a voice and type your text</p>
 
+        <div class="warning" id="warningBox">
+            ⚠️ Please open this file in Chrome browser for best voice support. Your current browser has limited TTS voices.
+        </div>
+
         <div class="voice-grid" id="voiceGrid">
-            <button class="voice-btn active" data-voice="US English Male" onclick="setVoice('US English Male', 'David')">
+            <button class="voice-btn active" data-voice="David" onclick="setVoice('David')">
                 <span class="voice-icon">👨</span>
                 <div class="voice-details">
                     <span class="voice-name">David</span>
                     <span class="voice-lang">English (US) - Male</span>
                 </div>
             </button>
-            <button class="voice-btn" data-voice="US English Female" onclick="setVoice('US English Female', 'Kylie')">
+            <button class="voice-btn" data-voice="Kylie" onclick="setVoice('Kylie')">
                 <span class="voice-icon">👩</span>
                 <div class="voice-details">
                     <span class="voice-name">Kylie</span>
                     <span class="voice-lang">English (US) - Female</span>
                 </div>
             </button>
-            <button class="voice-btn" data-voice="UK English Male" onclick="setVoice('UK English Male', 'Mario')">
+            <button class="voice-btn" data-voice="Mario" onclick="setVoice('Mario')">
                 <span class="voice-icon">👨</span>
                 <div class="voice-details">
                     <span class="voice-name">Mario</span>
                     <span class="voice-lang">English (UK) - Male for Tagalog</span>
                 </div>
             </button>
-            <button class="voice-btn" data-voice="google-fil" onclick="setVoice('google-fil', 'Petra')">
+            <button class="voice-btn" data-voice="Petra" onclick="setVoice('Petra')">
                 <span class="voice-icon">👩</span>
                 <div class="voice-details">
                     <span class="voice-name">Petra</span>
-                    <span class="voice-lang">Filipino - Female (Google TTS)</span>
+                    <span class="voice-lang">Filipino - Female</span>
                 </div>
             </button>
         </div>
@@ -363,40 +376,38 @@
         <div class="developed-by">Developed by: Torch Castro</div>
     </div>
 
-    <script src="https://code.responsivevoice.org/responsivevoice.js"></script>
-
     <script>
-        let currentVoice = 'US English Male';
-        let currentDisplayName = 'David';
+        let currentVoiceName = 'David';
         let speechSpeed = 1;
         let mediaRecorder = null;
         let audioChunks = [];
         let isRecording = false;
         let audioBlob = null;
-        let isResponsiveVoiceReady = false;
-        let currentAudioUrl = null;
+        let allVoices = [];
+        let isNativeTTS = false;
 
         const textInput = document.getElementById('textInput');
         const charCount = document.getElementById('charCount');
         const status = document.getElementById('status');
         const recordBtn = document.getElementById('recordBtn');
-        const audioContainer = document.getElementById('audioContainer');
-        const audioPlayer = document.getElementById('audioPlayer');
+        const warningBox = document.getElementById('warningBox');
+
+        // Voice configuration - maps display names to actual browser voice search terms
+        const voiceConfig = {
+            'David': { gender: 'male', lang: 'en', keywords: ['david', 'google us english', 'male'] },
+            'Kylie': { gender: 'female', lang: 'en', keywords: ['zira', 'google us english', 'female', 'samantha'] },
+            'Mario': { gender: 'male', lang: 'en', keywords: ['daniel', 'google uk english', 'male', 'british'] },
+            'Petra': { gender: 'female', lang: 'fil', keywords: ['filipino', 'fil'] }
+        };
 
         textInput.addEventListener('input', () => {
             charCount.textContent = textInput.value.length;
         });
 
-        function setVoice(voiceName, displayName) {
-            if (typeof responsiveVoice !== 'undefined') {
-                responsiveVoice.cancel();
-            }
-            
-            currentVoice = voiceName;
-            currentDisplayName = displayName;
-            
+        function setVoice(name) {
+            currentVoiceName = name;
             document.querySelectorAll('.voice-btn').forEach(btn => {
-                btn.classList.toggle('active', btn.dataset.voice === voiceName);
+                btn.classList.toggle('active', btn.dataset.voice === name);
             });
         }
 
@@ -411,19 +422,78 @@
             setTimeout(() => status.classList.remove('show'), 5000);
         }
 
-        function checkEngine() {
-            if (typeof responsiveVoice !== 'undefined') {
-                isResponsiveVoiceReady = true;
-                recordBtn.disabled = false;
-            } else {
-                showStatus('Failed to load TTS engine. Check internet connection.', 'error');
-            }
+        function loadVoices() {
+            return new Promise(resolve => {
+                let voices = speechSynthesis.getVoices();
+                if (voices.length > 0) {
+                    allVoices = voices;
+                    resolve(voices);
+                } else {
+                    speechSynthesis.onvoiceschanged = () => {
+                        allVoices = speechSynthesis.getVoices();
+                        resolve(allVoices);
+                    };
+                }
+            });
         }
 
-        // Google Translate TTS for Filipino - returns MP3 URL
-        function getGoogleTTSUrl(text, lang) {
-            const encodedText = encodeURIComponent(text);
-            return `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodedText}&tl=${lang}&client=tw-ob`;
+        function findBestVoice(config) {
+            // First try: exact language match + gender hint in name
+            let candidates = allVoices.filter(v => {
+                const name = v.name.toLowerCase();
+                const lang = v.lang.toLowerCase();
+                
+                // Check if language matches
+                const langMatch = config.lang === 'fil' 
+                    ? (lang.startsWith('fil') || lang.startsWith('tl'))
+                    : lang.startsWith(config.lang);
+                
+                if (!langMatch) return false;
+                
+                // Check gender hints
+                const hasGenderHint = config.keywords.some(k => name.includes(k.toLowerCase()));
+                return hasGenderHint;
+            });
+
+            if (candidates.length > 0) return candidates[0];
+
+            // Second try: language match only
+            candidates = allVoices.filter(v => {
+                const lang = v.lang.toLowerCase();
+                return config.lang === 'fil' 
+                    ? (lang.startsWith('fil') || lang.startsWith('tl'))
+                    : lang.startsWith(config.lang);
+            });
+
+            if (candidates.length > 0) {
+                // For Petra, prefer female-sounding names if no exact match
+                if (config.gender === 'female') {
+                    const femaleFirst = candidates.find(v => 
+                        /female|woman|girl|zira/i.test(v.name)
+                    );
+                    if (femaleFirst) return femaleFirst;
+                }
+                return candidates[0];
+            }
+
+            // Last resort: any voice
+            return allVoices[0];
+        }
+
+        async function init() {
+            await loadVoices();
+            
+            if (allVoices.length === 0) {
+                warningBox.classList.add('show');
+                showStatus('No TTS voices found. Please use Chrome browser.', 'error');
+                return;
+            }
+
+            isNativeTTS = true;
+            recordBtn.disabled = false;
+            
+            // Log available voices for debugging
+            console.log('Available voices:', allVoices.map(v => `${v.name} (${v.lang})`));
         }
 
         function speak() {
@@ -433,63 +503,47 @@
                 return;
             }
 
-            // Petra uses Google Translate TTS directly for real Filipino accent
-            if (currentVoice === 'google-fil') {
-                playGoogleTTS(text, 'fil');
+            if (!window.speechSynthesis) {
+                showStatus('Speech synthesis not supported in this browser.', 'error');
+                warningBox.classList.add('show');
                 return;
             }
 
-            // David, Kylie, Mario use ResponsiveVoice
-            if (!isResponsiveVoiceReady) {
-                showStatus('TTS engine not ready yet. Please wait or refresh.', 'error');
+            if (allVoices.length === 0) {
+                showStatus('Voices not loaded yet. Please wait.', 'error');
                 return;
             }
 
-            responsiveVoice.cancel();
+            speechSynthesis.cancel();
 
-            showStatus('Speaking with ' + currentDisplayName + '...', 'info');
-            recordBtn.disabled = false;
+            const config = voiceConfig[currentVoiceName];
+            const voice = findBestVoice(config);
 
-            setTimeout(() => {
-                responsiveVoice.speak(text, currentVoice, {
-                    rate: speechSpeed,
-                    pitch: 1,
-                    volume: 1,
-                    onstart: () => {
-                        showStatus('Speaking with ' + currentDisplayName + '...', 'info');
-                    },
-                    onend: () => {
-                        showStatus('Finished speaking!', 'success');
-                    },
-                    onerror: (e) => {
-                        showStatus('Speech error: ' + e, 'error');
-                    }
-                });
-            }, 50);
-        }
+            if (!voice) {
+                showStatus('No suitable voice found for ' + currentVoiceName, 'error');
+                return;
+            }
 
-        function playGoogleTTS(text, lang) {
-            // Google TTS has ~200 char limit, chunk if needed
-            const chunk = text.substring(0, 200);
-            const url = getGoogleTTSUrl(chunk, lang);
-            
-            audioPlayer.src = url;
-            audioContainer.classList.add('show');
-            currentAudioUrl = url;
-            
-            audioPlayer.oncanplay = () => {
-                audioPlayer.play();
-                showStatus('Playing Petra (Filipino)...', 'info');
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.voice = voice;
+            utterance.lang = voice.lang;
+            utterance.rate = speechSpeed;
+            utterance.pitch = 1;
+
+            utterance.onstart = () => {
+                showStatus(`Speaking with ${currentVoiceName} (${voice.name})...`, 'info');
                 recordBtn.disabled = false;
             };
-            
-            audioPlayer.onended = () => {
+
+            utterance.onend = () => {
                 showStatus('Finished speaking!', 'success');
             };
-            
-            audioPlayer.onerror = () => {
-                showStatus('Failed to load Filipino voice. Check internet connection.', 'error');
+
+            utterance.onerror = (e) => {
+                showStatus('Error: ' + e.error, 'error');
             };
+
+            speechSynthesis.speak(utterance);
         }
 
         async function toggleRecord() {
@@ -534,8 +588,10 @@
                     audioBlob = new Blob(audioChunks, { type: selectedMime || 'audio/webm' });
                     const audioUrl = URL.createObjectURL(audioBlob);
                     
+                    const audioPlayer = document.getElementById('audioPlayer');
                     audioPlayer.src = audioUrl;
-                    audioContainer.classList.add('show');
+                    
+                    document.getElementById('audioContainer').classList.add('show');
                     showStatus('Recording complete! You can now download the audio.', 'success');
                     
                     stream.getTracks().forEach(track => track.stop());
@@ -553,30 +609,23 @@
 
                 setTimeout(() => {
                     const text = textInput.value.trim();
-                    if (!text) return;
-                    
-                    if (currentVoice === 'google-fil') {
-                        // For Petra, play Google TTS and record system audio
-                        const chunk = text.substring(0, 200);
-                        const url = getGoogleTTSUrl(chunk, 'fil');
-                        audioPlayer.src = url;
-                        audioPlayer.play();
+                    if (text && isNativeTTS) {
+                        const config = voiceConfig[currentVoiceName];
+                        const voice = findBestVoice(config);
                         
-                        audioPlayer.onended = () => {
+                        const utterance = new SpeechSynthesisUtterance(text);
+                        if (voice) {
+                            utterance.voice = voice;
+                            utterance.lang = voice.lang;
+                        }
+                        utterance.rate = speechSpeed;
+                        utterance.pitch = 1;
+                        
+                        utterance.onend = () => {
                             setTimeout(() => stopRecording(), 500);
                         };
-                    } else if (isResponsiveVoiceReady) {
-                        responsiveVoice.cancel();
-                        setTimeout(() => {
-                            responsiveVoice.speak(text, currentVoice, {
-                                rate: speechSpeed,
-                                pitch: 1,
-                                volume: 1,
-                                onend: () => {
-                                    setTimeout(() => stopRecording(), 500);
-                                }
-                            });
-                        }, 50);
+                        
+                        speechSynthesis.speak(utterance);
                     }
                 }, 300);
 
@@ -604,7 +653,7 @@
             }
 
             const text = textInput.value.trim().substring(0, 30).replace(/[^a-z0-9]/gi, '_') || 'speech';
-            const voiceLabel = currentDisplayName;
+            const voiceLabel = currentVoiceName;
             
             const extension = audioBlob.type.includes('mp4') ? 'm4a' : 'webm';
             const filename = `${text}_${voiceLabel}.${extension}`;
@@ -624,16 +673,14 @@
         function clearText() {
             textInput.value = '';
             charCount.textContent = '0';
-            audioContainer.classList.remove('show');
-            audioPlayer.src = '';
-            currentAudioUrl = null;
-            if (isResponsiveVoiceReady) responsiveVoice.cancel();
+            document.getElementById('audioContainer').classList.remove('show');
+            speechSynthesis.cancel();
             if (isRecording) stopRecording();
             audioBlob = null;
         }
 
         window.addEventListener('load', () => {
-            setTimeout(checkEngine, 1000);
+            init();
         });
     </script>
 </body>
