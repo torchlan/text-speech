@@ -88,12 +88,6 @@
             box-shadow: 0 4px 12px rgba(118, 75, 162, 0.2);
         }
 
-        .voice-btn.missing {
-            opacity: 0.5;
-            border-color: #ff9800;
-            background: #fff3e0;
-        }
-
         .voice-icon {
             font-size: 1.4rem;
         }
@@ -110,12 +104,6 @@
         .voice-lang {
             font-size: 0.8rem;
             color: #888;
-        }
-
-        .voice-status {
-            font-size: 0.75rem;
-            color: #ff9800;
-            font-weight: 600;
         }
 
         textarea {
@@ -287,22 +275,6 @@
             letter-spacing: 0.5px;
         }
 
-        .voice-debug {
-            background: #f5f5f5;
-            border-radius: 8px;
-            padding: 12px;
-            margin-bottom: 16px;
-            font-size: 0.8rem;
-            color: #666;
-            max-height: 100px;
-            overflow-y: auto;
-            display: none;
-        }
-
-        .voice-debug.show {
-            display: block;
-        }
-
         @media (max-width: 600px) {
             .container {
                 padding: 24px;
@@ -323,39 +295,33 @@
         <h1>🎙️ Text to Speech</h1>
         <p class="subtitle">Select a voice and type your text</p>
 
-        <div class="voice-debug" id="voiceDebug">
-            <strong>Available Voices:</strong>
-            <div id="voiceList"></div>
-        </div>
-
         <div class="voice-grid" id="voiceGrid">
-            <button class="voice-btn active" data-voice="David" onclick="setVoice('David')">
+            <button class="voice-btn active" data-voice="US English Male" onclick="setVoice('US English Male', 'David')">
                 <span class="voice-icon">👨</span>
                 <div class="voice-details">
                     <span class="voice-name">David</span>
                     <span class="voice-lang">English (US) - Male</span>
                 </div>
             </button>
-            <button class="voice-btn" data-voice="Kylie" onclick="setVoice('Kylie')">
+            <button class="voice-btn" data-voice="US English Female" onclick="setVoice('US English Female', 'Kylie')">
                 <span class="voice-icon">👩</span>
                 <div class="voice-details">
                     <span class="voice-name">Kylie</span>
                     <span class="voice-lang">English (US) - Female</span>
                 </div>
             </button>
-            <button class="voice-btn" data-voice="Mario" onclick="setVoice('Mario')">
+            <button class="voice-btn" data-voice="UK English Male" onclick="setVoice('UK English Male', 'Mario')">
                 <span class="voice-icon">👨</span>
                 <div class="voice-details">
                     <span class="voice-name">Mario</span>
                     <span class="voice-lang">English (UK) - Male for Tagalog</span>
                 </div>
             </button>
-            <button class="voice-btn" data-voice="Petra" onclick="setVoice('Petra')">
+            <button class="voice-btn" data-voice="Filipino Female" onclick="setVoice('Filipino Female', 'Petra')">
                 <span class="voice-icon">👩</span>
                 <div class="voice-details">
                     <span class="voice-name">Petra</span>
                     <span class="voice-lang">Filipino - Female</span>
-                    <span class="voice-status" id="petraStatus"></span>
                 </div>
             </button>
         </div>
@@ -391,60 +357,37 @@
         <div class="developed-by">Developed by: Torch Castro</div>
     </div>
 
+    <!-- ResponsiveVoice with key parameter for GitHub Pages compatibility -->
+    <script src="https://code.responsivevoice.org/responsivevoice.js?key=YOUR_KEY"></script>
+
     <script>
-        let currentVoiceName = 'David';
+        let currentVoice = 'US English Male';
+        let currentDisplayName = 'David';
         let speechSpeed = 1;
         let mediaRecorder = null;
         let audioChunks = [];
         let isRecording = false;
         let audioBlob = null;
-        let allVoices = [];
-        let voiceMap = {};
+        let isResponsiveVoiceReady = false;
 
         const textInput = document.getElementById('textInput');
         const charCount = document.getElementById('charCount');
         const status = document.getElementById('status');
         const recordBtn = document.getElementById('recordBtn');
-        const voiceDebug = document.getElementById('voiceDebug');
-        const voiceList = document.getElementById('voiceList');
-
-        // STRICT voice mapping - each voice has explicit search criteria
-        // NO cross-language fallback allowed
-        const voiceConfig = {
-            'David': {
-                lang: 'en-US',
-                nameMatch: /Google US English|David|Male/i,
-                strictLang: true,
-                fallbackLang: null // No fallback - if not found, error
-            },
-            'Kylie': {
-                lang: 'en-US',
-                nameMatch: /Google US English|Zira|Female|Samantha/i,
-                strictLang: true,
-                fallbackLang: null
-            },
-            'Mario': {
-                lang: 'en-GB',
-                nameMatch: /Daniel|Google UK English|British/i,
-                strictLang: true,
-                fallbackLang: null
-            },
-            'Petra': {
-                lang: 'fil-PH',
-                nameMatch: /Filipino|Google Filipino|fil/i,
-                strictLang: true,
-                fallbackLang: null // STRICT: No fallback to English voices
-            }
-        };
 
         textInput.addEventListener('input', () => {
             charCount.textContent = textInput.value.length;
         });
 
-        function setVoice(name) {
-            currentVoiceName = name;
+        function setVoice(voiceName, displayName) {
+            if (typeof responsiveVoice !== 'undefined') {
+                responsiveVoice.cancel();
+            }
+            currentVoice = voiceName;
+            currentDisplayName = displayName;
+            
             document.querySelectorAll('.voice-btn').forEach(btn => {
-                btn.classList.toggle('active', btn.dataset.voice === name);
+                btn.classList.toggle('active', btn.dataset.voice === voiceName);
             });
         }
 
@@ -459,85 +402,17 @@
             setTimeout(() => status.classList.remove('show'), 5000);
         }
 
-        function loadVoices() {
-            return new Promise(resolve => {
-                let voices = speechSynthesis.getVoices();
-                if (voices.length > 0) {
-                    allVoices = voices;
-                    resolve(voices);
-                } else {
-                    speechSynthesis.onvoiceschanged = () => {
-                        allVoices = speechSynthesis.getVoices();
-                        resolve(allVoices);
-                    };
-                }
-            });
-        }
-
-        function findVoiceStrict(config) {
-            // Step 1: Exact language match + name pattern
-            let match = allVoices.find(v => {
-                const langMatch = v.lang.toLowerCase() === config.lang.toLowerCase() ||
-                                 v.lang.toLowerCase().startsWith(config.lang.toLowerCase().split('-')[0]);
-                const nameMatch = config.nameMatch.test(v.name);
-                return langMatch && nameMatch;
-            });
-            if (match) return match;
-
-            // Step 2: Language match only (any voice in that language)
-            match = allVoices.find(v => {
-                return v.lang.toLowerCase() === config.lang.toLowerCase() ||
-                       v.lang.toLowerCase().startsWith(config.lang.toLowerCase().split('-')[0]);
-            });
-            if (match) return match;
-
-            // Step 3: If strict mode is off, use fallback (but we keep it null for Petra)
-            if (config.fallbackLang) {
-                match = allVoices.find(v => v.lang.toLowerCase().startsWith(config.fallbackLang));
-                if (match) return match;
+        function initResponsiveVoice() {
+            // Wait for ResponsiveVoice to be ready
+            if (typeof responsiveVoice === 'undefined') {
+                showStatus('Loading TTS engine...', 'info');
+                setTimeout(initResponsiveVoice, 500);
+                return;
             }
 
-            return null; // STRICT: Return null if not found
-        }
-
-        function initVoiceMap() {
-            voiceMap = {};
-            let debugHtml = '';
-
-            for (const [name, config] of Object.entries(voiceConfig)) {
-                const voice = findVoiceStrict(config);
-                voiceMap[name] = voice;
-                
-                if (voice) {
-                    debugHtml += `<div>✅ ${name}: ${voice.name} (${voice.lang})</div>`;
-                } else {
-                    debugHtml += `<div>❌ ${name}: Not found</div>`;
-                }
-            }
-
-            voiceList.innerHTML = debugHtml;
-            voiceDebug.classList.add('show');
-
-            // Mark Petra as missing if no Filipino voice
-            const petraBtn = document.querySelector('[data-voice="Petra"]');
-            const petraStatus = document.getElementById('petraStatus');
-            if (!voiceMap['Petra']) {
-                petraBtn.classList.add('missing');
-                petraStatus.textContent = 'Not available';
-                showStatus('Petra (Filipino) voice not found on this device. Install Google TTS from Play Store.', 'error');
-            } else {
-                petraBtn.classList.remove('missing');
-                petraStatus.textContent = '';
-            }
-
-            if (Object.values(voiceMap).some(v => v !== null)) {
-                recordBtn.disabled = false;
-            }
-        }
-
-        async function init() {
-            await loadVoices();
-            initVoiceMap();
+            isResponsiveVoiceReady = true;
+            recordBtn.disabled = false;
+            showStatus('TTS engine ready!', 'success');
         }
 
         function speak() {
@@ -547,40 +422,34 @@
                 return;
             }
 
-            if (!window.speechSynthesis) {
-                showStatus('Speech synthesis not supported.', 'error');
+            if (!isResponsiveVoiceReady) {
+                showStatus('TTS engine loading... Please wait.', 'error');
                 return;
             }
 
-            const voice = voiceMap[currentVoiceName];
-            
-            if (!voice) {
-                showStatus(`${currentVoiceName} voice not available on this device.`, 'error');
-                return;
-            }
+            // Cancel any ongoing speech
+            responsiveVoice.cancel();
 
-            speechSynthesis.cancel();
+            showStatus('Speaking with ' + currentDisplayName + '...', 'info');
+            recordBtn.disabled = false;
 
-            const utterance = new SpeechSynthesisUtterance(text);
-            utterance.voice = voice;
-            utterance.lang = voice.lang;
-            utterance.rate = speechSpeed;
-            utterance.pitch = 1;
-
-            utterance.onstart = () => {
-                showStatus(`Speaking with ${currentVoiceName} (${voice.name})...`, 'info');
-                recordBtn.disabled = false;
-            };
-
-            utterance.onend = () => {
-                showStatus('Finished speaking!', 'success');
-            };
-
-            utterance.onerror = (e) => {
-                showStatus('Error: ' + e.error, 'error');
-            };
-
-            speechSynthesis.speak(utterance);
+            // Small delay to ensure clean voice switch
+            setTimeout(() => {
+                responsiveVoice.speak(text, currentVoice, {
+                    rate: speechSpeed,
+                    pitch: 1,
+                    volume: 1,
+                    onstart: () => {
+                        showStatus('Speaking with ' + currentDisplayName + '...', 'info');
+                    },
+                    onend: () => {
+                        showStatus('Finished speaking!', 'success');
+                    },
+                    onerror: (e) => {
+                        showStatus('Speech error: ' + e, 'error');
+                    }
+                });
+            }, 100);
         }
 
         async function toggleRecord() {
@@ -646,25 +515,18 @@
 
                 setTimeout(() => {
                     const text = textInput.value.trim();
-                    if (text) {
-                        const voice = voiceMap[currentVoiceName];
-                        if (!voice) {
-                            showStatus(`${currentVoiceName} not available for recording.`, 'error');
-                            stopRecording();
-                            return;
-                        }
-                        
-                        const utterance = new SpeechSynthesisUtterance(text);
-                        utterance.voice = voice;
-                        utterance.lang = voice.lang;
-                        utterance.rate = speechSpeed;
-                        utterance.pitch = 1;
-                        
-                        utterance.onend = () => {
-                            setTimeout(() => stopRecording(), 500);
-                        };
-                        
-                        speechSynthesis.speak(utterance);
+                    if (text && isResponsiveVoiceReady) {
+                        responsiveVoice.cancel();
+                        setTimeout(() => {
+                            responsiveVoice.speak(text, currentVoice, {
+                                rate: speechSpeed,
+                                pitch: 1,
+                                volume: 1,
+                                onend: () => {
+                                    setTimeout(() => stopRecording(), 500);
+                                }
+                            });
+                        }, 100);
                     }
                 }, 300);
 
@@ -692,7 +554,7 @@
             }
 
             const text = textInput.value.trim().substring(0, 30).replace(/[^a-z0-9]/gi, '_') || 'speech';
-            const voiceLabel = currentVoiceName;
+            const voiceLabel = currentDisplayName;
             
             const extension = audioBlob.type.includes('mp4') ? 'm4a' : 'webm';
             const filename = `${text}_${voiceLabel}.${extension}`;
@@ -713,13 +575,14 @@
             textInput.value = '';
             charCount.textContent = '0';
             document.getElementById('audioContainer').classList.remove('show');
-            speechSynthesis.cancel();
+            if (isResponsiveVoiceReady) responsiveVoice.cancel();
             if (isRecording) stopRecording();
             audioBlob = null;
         }
 
+        // Initialize when page loads
         window.addEventListener('load', () => {
-            init();
+            setTimeout(initResponsiveVoice, 1500);
         });
     </script>
 </body>
