@@ -323,11 +323,11 @@
                     <span class="voice-lang">English (UK) - Male for Tagalog</span>
                 </div>
             </button>
-            <button class="voice-btn" data-voice="Filipino Female" onclick="setVoice('Filipino Female', 'Petra')">
+            <button class="voice-btn" data-voice="google-fil" onclick="setVoice('google-fil', 'Petra')">
                 <span class="voice-icon">👩</span>
                 <div class="voice-details">
                     <span class="voice-name">Petra</span>
-                    <span class="voice-lang">Filipino - Female</span>
+                    <span class="voice-lang">Filipino - Female (Google TTS)</span>
                 </div>
             </button>
         </div>
@@ -374,18 +374,20 @@
         let isRecording = false;
         let audioBlob = null;
         let isResponsiveVoiceReady = false;
+        let currentAudioUrl = null;
 
         const textInput = document.getElementById('textInput');
         const charCount = document.getElementById('charCount');
         const status = document.getElementById('status');
         const recordBtn = document.getElementById('recordBtn');
+        const audioContainer = document.getElementById('audioContainer');
+        const audioPlayer = document.getElementById('audioPlayer');
 
         textInput.addEventListener('input', () => {
             charCount.textContent = textInput.value.length;
         });
 
         function setVoice(voiceName, displayName) {
-            // Cancel any ongoing speech to prevent voice caching/sticking issues
             if (typeof responsiveVoice !== 'undefined') {
                 responsiveVoice.cancel();
             }
@@ -418,6 +420,12 @@
             }
         }
 
+        // Google Translate TTS for Filipino - returns MP3 URL
+        function getGoogleTTSUrl(text, lang) {
+            const encodedText = encodeURIComponent(text);
+            return `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodedText}&tl=${lang}&client=tw-ob`;
+        }
+
         function speak() {
             const text = textInput.value.trim();
             if (!text) {
@@ -425,18 +433,23 @@
                 return;
             }
 
+            // Petra uses Google Translate TTS directly for real Filipino accent
+            if (currentVoice === 'google-fil') {
+                playGoogleTTS(text, 'fil');
+                return;
+            }
+
+            // David, Kylie, Mario use ResponsiveVoice
             if (!isResponsiveVoiceReady) {
                 showStatus('TTS engine not ready yet. Please wait or refresh.', 'error');
                 return;
             }
 
-            // Hard cancel to clear any cached voice state
             responsiveVoice.cancel();
 
             showStatus('Speaking with ' + currentDisplayName + '...', 'info');
             recordBtn.disabled = false;
 
-            // Use a small delay after cancel to ensure voice switch happens
             setTimeout(() => {
                 responsiveVoice.speak(text, currentVoice, {
                     rate: speechSpeed,
@@ -453,6 +466,30 @@
                     }
                 });
             }, 50);
+        }
+
+        function playGoogleTTS(text, lang) {
+            // Google TTS has ~200 char limit, chunk if needed
+            const chunk = text.substring(0, 200);
+            const url = getGoogleTTSUrl(chunk, lang);
+            
+            audioPlayer.src = url;
+            audioContainer.classList.add('show');
+            currentAudioUrl = url;
+            
+            audioPlayer.oncanplay = () => {
+                audioPlayer.play();
+                showStatus('Playing Petra (Filipino)...', 'info');
+                recordBtn.disabled = false;
+            };
+            
+            audioPlayer.onended = () => {
+                showStatus('Finished speaking!', 'success');
+            };
+            
+            audioPlayer.onerror = () => {
+                showStatus('Failed to load Filipino voice. Check internet connection.', 'error');
+            };
         }
 
         async function toggleRecord() {
@@ -497,10 +534,8 @@
                     audioBlob = new Blob(audioChunks, { type: selectedMime || 'audio/webm' });
                     const audioUrl = URL.createObjectURL(audioBlob);
                     
-                    const audioPlayer = document.getElementById('audioPlayer');
                     audioPlayer.src = audioUrl;
-                    
-                    document.getElementById('audioContainer').classList.add('show');
+                    audioContainer.classList.add('show');
                     showStatus('Recording complete! You can now download the audio.', 'success');
                     
                     stream.getTracks().forEach(track => track.stop());
@@ -518,7 +553,19 @@
 
                 setTimeout(() => {
                     const text = textInput.value.trim();
-                    if (text && isResponsiveVoiceReady) {
+                    if (!text) return;
+                    
+                    if (currentVoice === 'google-fil') {
+                        // For Petra, play Google TTS and record system audio
+                        const chunk = text.substring(0, 200);
+                        const url = getGoogleTTSUrl(chunk, 'fil');
+                        audioPlayer.src = url;
+                        audioPlayer.play();
+                        
+                        audioPlayer.onended = () => {
+                            setTimeout(() => stopRecording(), 500);
+                        };
+                    } else if (isResponsiveVoiceReady) {
                         responsiveVoice.cancel();
                         setTimeout(() => {
                             responsiveVoice.speak(text, currentVoice, {
@@ -577,7 +624,9 @@
         function clearText() {
             textInput.value = '';
             charCount.textContent = '0';
-            document.getElementById('audioContainer').classList.remove('show');
+            audioContainer.classList.remove('show');
+            audioPlayer.src = '';
+            currentAudioUrl = null;
             if (isResponsiveVoiceReady) responsiveVoice.cancel();
             if (isRecording) stopRecording();
             audioBlob = null;
